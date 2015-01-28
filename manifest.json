@@ -1,0 +1,14 @@
+{
+  "manifest_version": 2,
+  "name": "SMS Monitor",
+  "description": "SMS Monitor",
+  "version": "1.0.5",
+  "app": {
+    "background": {
+      "scripts": ["background.js"]
+    }
+  },
+  "permissions": [
+    "serial"
+  ]
+}
