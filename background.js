@@ -1,9 +1,10 @@
 var connections = {};
 var todos = [];
 
+var noop = function() {}
+
 function send(msg, callback) {
-	this.callback = callback;
-	chrome.serial.send(this.connectionId, str2ab(msg + '\r'), function(sendInfo) {});
+	chrome.serial.send(this.connectionId, str2ab(msg + '\r'), callback || noop);
 }
 
 var SMSManager = {
@@ -28,14 +29,13 @@ var SMSManager = {
 				connect(port.path);
 			};
 		});
-	},
-	checkSMSReceived: function() {
-		var time = this.delay;
-		setTimeout(function() {
-
-
-			setTimeout(arguments.callee, time);
-		}, time);
+		//close
+		chrome.runtime.onSuspend.addListener(function() {
+			for (var id in connections) {
+				var connection = connections[id];
+				chrome.serial.disconnect(id, noop);
+			};
+		});
 	},
 	sendMessage: function(option, callback) {
 		if (!option) {
@@ -45,19 +45,16 @@ var SMSManager = {
 			return;
 		}
 		connection = connections[option.connectionId];
-		connection && connection.send('AT', function(res) {
-			res.indexOf('OK') !== -1 &&
-				connection.send('AT+CMGF=1', function(res) {
-					if (res.indexOf('OK') !== -1) {
-						connection.send('AT+CMGS="{to}"'.replace('{to}', option.to));
-						connection.send(option.message.concat(String.fromCharCode(26)), function(res) {
-							callback && callback.call(connection, res);
-						});
-					}
+		connection && connection.send('AT', function() {
+			connection.send('AT+CMGF=1', function() {
+				connection.send('AT+CMGS="{to}"'.replace('{to}', option.to));
+				connection.send(option.message.concat(String.fromCharCode(26)), function() {
+					callback && callback.call(connection);
 				});
+			});
 		});
 	},
-	receiveMessage: function(info) {
+	receiveMessage: function(info, connection) {
 		console.log(info);
 	}
 };
@@ -74,10 +71,6 @@ function ab2str(buf) {
 	return String.fromCharCode.apply(null, new Uint8Array(buf));
 }
 
-function onLineReceived(msg, connection) {
-
-}
-
 var onReceiveCallback = function(info) {
 	var connection = connections[info.connectionId];
 	var messages = connection.messages;
@@ -89,22 +82,22 @@ var onReceiveCallback = function(info) {
 			message += str.substring(0, str.length - 1).trim();
 			messages.push(message);
 			console.log(message);
-
-			if (message.match(/\+CMTI: "SM",(\d)/)) {
+			if (message.match(/\+CMTI: "SM",(\d+)/)) {
 				var id = RegExp.$1;
-				connection.send('AT+CMGR=' + id, function(res) {
-					var array = res.replace(/"/g, '').split(/[,\n]/);
-					if (array[6] && array[6] === 'OK') {
-						SMSManager.receiveMessage({
-							from: array[1],
-							date: array[3],
-							time: array[4],
-							content: decode(array[5])
-						});
-					}
-				});
+				connection.send('AT+CMGR=' + id);
 			}
-			connection.callback && connection.callback.call(connection, message);
+
+			if (message.match(/\+CMGR: "REC UNREAD",/)) {
+				var array = message.replace(/"/g, '').split(/[,\n\r]+/);
+				if (array[5] && array[5] === 'OK') {
+					SMSManager.receiveMessage({
+						from: array[1],
+						date: array[2],
+						time: array[3],
+						content: decode(array[4])
+					}, connection);
+				}
+			}
 			message = '';
 		} else {
 			message += str;
@@ -114,10 +107,7 @@ var onReceiveCallback = function(info) {
 
 chrome.serial.onReceive.addListener(onReceiveCallback);
 
-function writeSerial(connectionId, str, callback) {
-		chrome.serial.send(connectionId, str2ab(str + '\r'), function(sendInfo) {});
-	}
-	// Convert string to ArrayBuffer
+// Convert string to ArrayBuffer
 function str2ab(str) {
 	var buf = new ArrayBuffer(str.length);
 	var bufView = new Uint8Array(buf);
