@@ -16,11 +16,14 @@ var SMSManager = {
 					bitrate: 115200
 				}, function(connectionInfo) {
 					var id = connectionInfo.connectionId;
-					connections[id] = connectionInfo;
-					connections[id]['path'] = path;
-					connections[id]['messages'] = [];
-					connections[id]['message'] = '';
-					connections[id]['send'] = send;
+					var connection = connectionInfo;
+					connection['path'] = path;
+					connection['messages'] = [];
+					connection['message'] = '';
+					connection['send'] = send;
+					//
+					connection.send('AT+CCID');
+					connections[id] = connection;
 				});
 			}
 
@@ -55,7 +58,12 @@ var SMSManager = {
 		});
 	},
 	receiveMessage: function(info, connection) {
-		console.log(info);
+		if (info.from === '10086' && info.content.match(/尊敬的客户：您本机号码为(\d{11})，/)) {
+			connection.number = RegExp.$1;
+			var data = {};
+			data[connection.ccid] = connection.number;
+			chrome.storage.sync.set(data);
+		}
 	}
 };
 
@@ -97,6 +105,28 @@ var onReceiveCallback = function(info) {
 						content: decode(array[4])
 					}, connection);
 				}
+			}
+
+			if (message.match(/\+CCID: "(\d{20})"/)) {
+				var ccid = RegExp.$1;
+				connection.ccid = ccid;
+				chrome.storage.sync.get(ccid, function(data) {
+					var number = data[ccid];
+					if (number) {
+						connection.number = number;
+					} else {
+						SMSManager.sendMessage({
+							to: '10086',
+							message: 'BJ',
+							connectionId: connection.connectionId
+						});
+					}
+				})
+
+			}
+
+			if (message.indexOf('ERROR') !== -1) {
+				console.log(connection);
 			}
 			message = '';
 		} else {

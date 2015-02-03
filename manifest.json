@@ -9,6 +9,6 @@
     }
   },
   "permissions": [
-    "serial"
+    "serial", "storage"
   ]
 }
